@@ -102,7 +102,7 @@ Select one or more rows in the results table to include them in the aggregated v
     limit = st.number_input(
         "Max results",
         min_value=1,
-        max_value=500,
+        max_value=5000,
         value=100,
         step=1,
         key="descriptor_max_results",
@@ -165,7 +165,7 @@ Select one or more rows in the results table to include them in the aggregated v
         limit = st.number_input(
             "Max results",
             min_value=1,
-            max_value=500,
+            max_value=5000,
             value=50,
             step=1,
         )
