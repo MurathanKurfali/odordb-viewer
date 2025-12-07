@@ -49,7 +49,7 @@ def _datasets_for_rows(conn: sqlite3.Connection, rows: List[OdorRow]) -> Dict[st
 def _select_rows_via_table(df: pd.DataFrame, table_key: str) -> List[str]:
     """Render a data_editor with a selectable checkbox column and return selected IDs.
 
-    The user can click the checkbox in any number of rows they want.
+    The user can click the checkbox in any number of rows.
     If none are selected, we fall back to the first row.
     """
     if df.empty:
@@ -79,9 +79,74 @@ def _select_rows_via_table(df: pd.DataFrame, table_key: str) -> List[str]:
     return selected_ids
 
 
+def descriptor_search_tab(conn: sqlite3.Connection) -> List[OdorRow]:
+    st.subheader("Search by descriptor text")
+    st.markdown("""
+_Search odors by words in descriptor-like fields (e.g. **sweat**, **citrus**, **smoky**).  
+Select one or more rows in the results table to include them in the aggregated view below._
+""")
+
+    all_datasets = list_all_datasets(conn)
+    dataset_filter = st.selectbox(
+        "Restrict to dataset (optional)",
+        options=["(all datasets)"] + all_datasets,
+        index=0,
+        key="descriptor_dataset_filter",
+    )
+    dataset_filter_val = None if dataset_filter == "(all datasets)" else dataset_filter
+
+    text = st.text_input(
+        "Descriptor text to search for",
+        placeholder="e.g. sour, citrus, smoky",
+    )
+    limit = st.number_input(
+        "Max results",
+        min_value=1,
+        max_value=500,
+        value=100,
+        step=1,
+        key="descriptor_max_results",
+    )
+
+    if not text:
+        st.info("Enter descriptor text (e.g. 'sweat') to search in descriptor-like columns.")
+        return []
+
+    rows = descriptor_search(conn, text=text, dataset=dataset_filter_val, limit=int(limit))
+    if not rows:
+        st.warning("No odors found with that descriptor text in descriptor columns.")
+        return []
+
+    ds_map = _datasets_for_rows(conn, rows)
+    data = [
+        {
+            "unified_odor_id": r.unified_odor_id,
+            "name": r.name,
+            "cid": r.cid,
+            "cas": r.cas,
+            "smiles": r.smiles,
+            "datasets": ", ".join(ds_map.get(r.unified_odor_id, [])),
+        }
+        for r in rows
+    ]
+    df = pd.DataFrame(data)
+    st.write("Results (tick the checkbox in one or more rows to select odors):")
+    selected_ids = _select_rows_via_table(df, table_key="descriptor_search_table")
+
+    if not selected_ids:
+        return []
+
+    selected_rows = [r for r in rows if r.unified_odor_id in selected_ids]
+    return selected_rows
+
+
 def odor_search_tab(conn: sqlite3.Connection) -> List[OdorRow]:
     """Compound search tab (by ID / name / CID / CAS)."""
-    st.subheader("Search by odor ID / name / CID / CAS")
+    st.subheader("Search by compound identifiers")
+    st.markdown("""
+_Search by **name**, **CID**, **CAS**, or unified odor ID (e.g. `OID:abraham_2012:1`).  
+Select one or more rows in the results table to include them in the aggregated view below._
+""")
 
     all_datasets = list_all_datasets(conn)
     dataset_filter = st.selectbox(
@@ -138,65 +203,8 @@ def odor_search_tab(conn: sqlite3.Connection) -> List[OdorRow]:
         for r in rows
     ]
     df = pd.DataFrame(data)
-    st.write("Results (click the checkbox in one or more rows to select odors):")
+    st.write("Results (tick the checkbox in one or more rows to select odors):")
     selected_ids = _select_rows_via_table(df, table_key="odor_search_table")
-
-    if not selected_ids:
-        return []
-
-    selected_rows = [r for r in rows if r.unified_odor_id in selected_ids]
-    return selected_rows
-
-
-def descriptor_search_tab(conn: sqlite3.Connection) -> List[OdorRow]:
-    st.subheader("Search by descriptor text")
-
-    all_datasets = list_all_datasets(conn)
-    dataset_filter = st.selectbox(
-        "Restrict to dataset (optional)",
-        options=["(all datasets)"] + all_datasets,
-        index=0,
-        key="descriptor_dataset_filter",
-    )
-    dataset_filter_val = None if dataset_filter == "(all datasets)" else dataset_filter
-
-    text = st.text_input(
-        "Descriptor text to search for",
-        placeholder="e.g. sour, citrus, smoky",
-    )
-    limit = st.number_input(
-        "Max results",
-        min_value=1,
-        max_value=500,
-        value=100,
-        step=1,
-        key="descriptor_max_results",
-    )
-
-    if not text:
-        st.info("Enter descriptor text (e.g. sour) to search in descriptor-like columns.")
-        return []
-
-    rows = descriptor_search(conn, text=text, dataset=dataset_filter_val, limit=int(limit))
-    if not rows:
-        st.warning("No odors found with that descriptor text in descriptor columns.")
-        return []
-
-    ds_map = _datasets_for_rows(conn, rows)
-    data = [
-        {
-            "unified_odor_id": r.unified_odor_id,
-            "name": r.name,
-            "cid": r.cid,
-            "cas": r.cas,
-            "smiles": r.smiles,
-            "datasets": ", ".join(ds_map.get(r.unified_odor_id, [])),
-        }
-        for r in rows
-    ]
-    df = pd.DataFrame(data)
-    st.write("Results (click the checkbox in one or more rows to select odors):")
-    selected_ids = _select_rows_via_table(df, table_key="descriptor_search_table")
 
     if not selected_ids:
         return []
@@ -207,6 +215,10 @@ def descriptor_search_tab(conn: sqlite3.Connection) -> List[OdorRow]:
 
 def odors_overview_tab(conn: sqlite3.Connection) -> None:
     st.subheader("Odor overview (ID, name, molecules)")
+    st.markdown("""
+_Browse a list of odors with identifiers (name, CID, CAS, SMILES) and  
+chemical properties aggregated from stimulus/molecule tables (no behavioral data)._
+""")
 
     limit = st.number_input(
         "Max odors to show",
@@ -219,7 +231,7 @@ def odors_overview_tab(conn: sqlite3.Connection) -> None:
 
     rows = list_odors(conn, limit=int(limit))
     if not rows:
-        st.info("No odors in the database yet. Did you run 'odordb ingest'?")
+        st.info("No odors in the database yet. Did you run `odordb ingest`?")
         return
 
     ds_map = _datasets_for_rows(conn, rows)
@@ -275,11 +287,6 @@ def odors_overview_tab(conn: sqlite3.Connection) -> None:
                 pivot = pivot.reset_index()
                 df = df.merge(pivot, on="unified_odor_id", how="left")
 
-    st.write(
-        "This view lists odors, molecule-level identifiers (CID, CAS, SMILES, name), "
-        "and chemical properties aggregated from stimuli/molecules tables "
-        "(no behavioral measurements)."
-    )
     st.dataframe(df, use_container_width=True)
 
 
@@ -348,7 +355,12 @@ def details_section_multi(conn: sqlite3.Connection, odors: List[OdorRow]) -> Non
     )
     df_pivot = df_pivot.reset_index()
 
-    st.subheader("Values across datasets")
+    st.markdown("""
+### Values across datasets
+
+This table shows all available (non-behavioral) information for **all selected odors**,  
+merged across datasets and files. Use the download button below to export it as CSV.
+""")
     st.dataframe(df_pivot, use_container_width=True)
 
     # Export combined wide view as a single CSV
@@ -363,6 +375,18 @@ def details_section_multi(conn: sqlite3.Connection, odors: List[OdorRow]) -> Non
 
 def main() -> None:
     page_header()
+
+    # Global usage instructions (top of page)
+    st.markdown("""
+### How to use this tool
+
+1. Use **Descriptor search** or **Compund search** to find odors of interest.  
+2. In the results table, tick the checkbox for one or more rows to select odors.  
+3. Scroll down to see **Values across datasets**, which aggregates information for all selected odors.  
+4. Click **Download values as CSV** to export the combined table.  
+5. Use **Odor overview** to browse the full set of odors and their basic chemical identifiers.
+""")
+
     conn = get_connection_for_ui()
 
     # TAB ORDER: descriptor search first, then compound search, then overview
