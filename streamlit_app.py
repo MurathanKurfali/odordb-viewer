@@ -223,7 +223,7 @@ chemical properties aggregated from stimulus/molecule tables (no behavioral data
     limit = st.number_input(
         "Max odors to show",
         min_value=10,
-        max_value=2000,
+        max_value=20000,
         value=200,
         step=10,
         key="overview_max_odors",
@@ -378,13 +378,14 @@ def main() -> None:
 
     # Global usage instructions (top of page)
     st.markdown("""
-### How to use this tool
+### Mini Readme
 
-1. Use **Descriptor search** or **Compund search** to find odors of interest.  
+1. Use the **Descriptor search** or **Compund search** tab to find odors of interest in the database.
 2. In the results table, tick the checkbox for one or more rows to select odors.  
 3. Scroll down to see **Values across datasets**, which aggregates information for all selected odors.  
 4. Click **Download values as CSV** to export the combined table.  
 5. Use **Odor overview** to browse the full set of odors and their basic chemical identifiers.
+The database currently consists of 24 datasets from the Pyrfume project (https://pyrfume.org/).
 """)
 
     conn = get_connection_for_ui()
