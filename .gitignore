@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+.idea/
+.vscode/
+*.sqlite3
+.pytest_cache/
+dist/
+build/
+*.egg-info/
+.streamlit/
+datasets
