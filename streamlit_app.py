@@ -385,7 +385,7 @@ def main() -> None:
 3. Scroll down to see **Values across datasets**, which aggregates information for all selected odors.  
 4. Click **Download values as CSV** to export the combined table.  
 5. Use **Odor overview** to browse the full set of odors and their basic chemical identifiers.
-The database currently consists of 24 datasets from the Pyrfume project (https://pyrfume.org/).
+The database currently consists of 27 datasets from the Pyrfume project (https://pyrfume.org/).
 """)
 
     conn = get_connection_for_ui()
