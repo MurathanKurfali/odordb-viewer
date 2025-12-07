@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 import pandas as pd
 import streamlit as st
@@ -38,22 +38,22 @@ def page_header() -> None:
     st.caption("Unified view of odors across multiple datasets (local CSVs).")
 
 
-def _datasets_for_rows(conn: sqlite3.Connection, rows: List[OdorRow]) -> dict[str, List[str]]:
+def _datasets_for_rows(conn: sqlite3.Connection, rows: List[OdorRow]) -> Dict[str, List[str]]:
     """Return a mapping unified_odor_id -> sorted list of dataset slugs."""
-    out: dict[str, List[str]] = {}
+    out: Dict[str, List[str]] = {}
     for r in rows:
         out[r.unified_odor_id] = get_datasets_for_odor(conn, r.unified_odor_id)
     return out
 
 
-def _select_row_via_table(df: pd.DataFrame, table_key: str) -> Optional[str]:
-    """Render a data_editor with a selectable checkbox column and return the selected ID.
+def _select_rows_via_table(df: pd.DataFrame, table_key: str) -> List[str]:
+    """Render a data_editor with a selectable checkbox column and return selected IDs.
 
-    The user can click the checkbox in the row they want. If none are selected,
-    we fall back to the first row.
+    The user can click the checkbox in any number of rows they want.
+    If none are selected, we fall back to the first row.
     """
     if df.empty:
-        return None
+        return []
 
     df_view = df.copy()
     select_col = "_select"
@@ -66,15 +66,21 @@ def _select_row_via_table(df: pd.DataFrame, table_key: str) -> Optional[str]:
         key=table_key,
     )
 
+    selected_ids: List[str] = []
     if select_col in edited.columns:
         selected_rows = edited[edited[select_col] == True]
         if not selected_rows.empty:
-            return str(selected_rows["unified_odor_id"].iloc[0])
+            selected_ids = [str(v) for v in selected_rows["unified_odor_id"].tolist()]
 
-    return str(df["unified_odor_id"].iloc[0])
+    if not selected_ids:
+        # Fallback: first row
+        selected_ids = [str(df["unified_odor_id"].iloc[0])]
+
+    return selected_ids
 
 
-def odor_search_tab(conn: sqlite3.Connection) -> Optional[OdorRow]:
+def odor_search_tab(conn: sqlite3.Connection) -> List[OdorRow]:
+    """Compound search tab (by ID / name / CID / CAS)."""
     st.subheader("Search by odor ID / name / CID / CAS")
 
     all_datasets = list_all_datasets(conn)
@@ -107,18 +113,18 @@ def odor_search_tab(conn: sqlite3.Connection) -> Optional[OdorRow]:
         rows = search_odors(conn, query=query, limit=int(limit))
     else:
         st.info("Enter a search query or tick 'List all odors'.")
-        return None
+        return []
 
     if not rows:
         st.warning("No matching odors found.")
-        return None
+        return []
 
     ds_map = _datasets_for_rows(conn, rows)
     if dataset_filter_val is not None:
         rows = [r for r in rows if dataset_filter_val in ds_map.get(r.unified_odor_id, [])]
         if not rows:
             st.warning("No odors found in that dataset with the given search.")
-            return None
+            return []
 
     data = [
         {
@@ -132,17 +138,17 @@ def odor_search_tab(conn: sqlite3.Connection) -> Optional[OdorRow]:
         for r in rows
     ]
     df = pd.DataFrame(data)
-    st.write("Results (click the checkbox in a row to select an odor):")
-    selected_id = _select_row_via_table(df, table_key="odor_search_table")
+    st.write("Results (click the checkbox in one or more rows to select odors):")
+    selected_ids = _select_rows_via_table(df, table_key="odor_search_table")
 
-    if selected_id is None:
-        return None
+    if not selected_ids:
+        return []
 
-    selected_row = next((r for r in rows if r.unified_odor_id == selected_id), None)
-    return selected_row
+    selected_rows = [r for r in rows if r.unified_odor_id in selected_ids]
+    return selected_rows
 
 
-def descriptor_search_tab(conn: sqlite3.Connection) -> Optional[OdorRow]:
+def descriptor_search_tab(conn: sqlite3.Connection) -> List[OdorRow]:
     st.subheader("Search by descriptor text")
 
     all_datasets = list_all_datasets(conn)
@@ -169,12 +175,12 @@ def descriptor_search_tab(conn: sqlite3.Connection) -> Optional[OdorRow]:
 
     if not text:
         st.info("Enter descriptor text (e.g. sour) to search in descriptor-like columns.")
-        return None
+        return []
 
     rows = descriptor_search(conn, text=text, dataset=dataset_filter_val, limit=int(limit))
     if not rows:
         st.warning("No odors found with that descriptor text in descriptor columns.")
-        return None
+        return []
 
     ds_map = _datasets_for_rows(conn, rows)
     data = [
@@ -189,14 +195,14 @@ def descriptor_search_tab(conn: sqlite3.Connection) -> Optional[OdorRow]:
         for r in rows
     ]
     df = pd.DataFrame(data)
-    st.write("Results (click the checkbox in a row to select an odor):")
-    selected_id = _select_row_via_table(df, table_key="descriptor_search_table")
+    st.write("Results (click the checkbox in one or more rows to select odors):")
+    selected_ids = _select_rows_via_table(df, table_key="descriptor_search_table")
 
-    if selected_id is None:
-        return None
+    if not selected_ids:
+        return []
 
-    selected_row = next((r for r in rows if r.unified_odor_id == selected_id), None)
-    return selected_row
+    selected_rows = [r for r in rows if r.unified_odor_id in selected_ids]
+    return selected_rows
 
 
 def odors_overview_tab(conn: sqlite3.Connection) -> None:
@@ -277,42 +283,41 @@ def odors_overview_tab(conn: sqlite3.Connection) -> None:
     st.dataframe(df, use_container_width=True)
 
 
-def details_section(conn: sqlite3.Connection, odor: OdorRow) -> None:
-    st.subheader("Odor details")
-
-    datasets = get_datasets_for_odor(conn, odor.unified_odor_id)
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("Unified ID", odor.unified_odor_id)
-        st.write(f"**Name**: {odor.name or ''}")
-    with c2:
-        st.write(f"**CID**: {odor.cid or ''}")
-        st.write(f"**CAS**: {odor.cas or ''}")
-    with c3:
-        st.write(f"**SMILES**: {odor.smiles or ''}")
-        st.write("**Datasets**:")
-        if datasets:
-            st.write(", ".join(datasets))
-        else:
-            st.write("(none)")
-
-    st.markdown("---")
-    st.subheader("Values across datasets")
-
-    facts = list(get_odor_facts(conn, odor.unified_odor_id))
-    if not facts:
-        st.info("No facts found for this odor.")
+def details_section_multi(conn: sqlite3.Connection, odors: List[OdorRow]) -> None:
+    """Show a single combined 'Values across datasets' table for all selected odors."""
+    if not odors:
         return
 
-    df = pd.DataFrame(facts)
-    st.write("All values (long table):")
-    st.dataframe(df, use_container_width=True)
+    # --- Combined wide view for all selected odors ---
 
-    st.markdown("#### Optional wide view")
-    grouped = df.groupby(["slug", "file", "column"])
+    all_facts = []
+    for o in odors:
+        these_facts = list(get_odor_facts(conn, o.unified_odor_id))
+        for f in these_facts:
+            # Ensure we have a mutable dict
+            if not isinstance(f, dict):
+                f = dict(f)
+            # Attach the unified_odor_id so we can group by it
+            f["unified_odor_id"] = o.unified_odor_id
+            all_facts.append(f)
+
+    if not all_facts:
+        st.info("No facts found for the selected odors.")
+        return
+
+    df = pd.DataFrame(all_facts)
+
+    # Be defensive: make sure required columns exist
+    required_cols = ["unified_odor_id", "slug", "file", "column", "value"]
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        st.error(f"Missing expected columns in facts: {missing}")
+        st.dataframe(df, use_container_width=True)
+        return
+
+    grouped = df.groupby(["unified_odor_id", "slug", "file", "column"])
     rows_agg = []
-    for (slug, file, column), sub in grouped:
+    for (unified_odor_id, slug, file, column), sub in grouped:
         vals = list(sub["value"])
         numeric_vals = [v for v in vals if isinstance(v, (int, float))]
         if numeric_vals and len(numeric_vals) == len(vals):
@@ -322,48 +327,68 @@ def details_section(conn: sqlite3.Connection, odor: OdorRow) -> None:
             agg = "; ".join(sorted(set(text_vals)))
         rows_agg.append(
             {
+                "unified_odor_id": unified_odor_id,
                 "slug": slug,
                 "file": file,
                 "column": column,
                 "value": agg,
             }
         )
+
     df_agg = pd.DataFrame(rows_agg)
-    if not df_agg.empty:
-        df_pivot = df_agg.pivot_table(
-            index=["slug", "file"],
-            columns="column",
-            values="value",
-            aggfunc="first",
-        )
-        df_pivot = df_pivot.reset_index()
-        st.dataframe(df_pivot, use_container_width=True)
-    else:
+    if df_agg.empty:
         st.info("No aggregated data available.")
+        return
+
+    df_pivot = df_agg.pivot_table(
+        index=["unified_odor_id", "slug", "file"],
+        columns="column",
+        values="value",
+        aggfunc="first",
+    )
+    df_pivot = df_pivot.reset_index()
+
+    st.subheader("Values across datasets")
+    st.dataframe(df_pivot, use_container_width=True)
+
+    # Export combined wide view as a single CSV
+    csv_data = df_pivot.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="Download values as CSV",
+        data=csv_data,
+        file_name="selected_odors_values.csv",
+        mime="text/csv",
+    )
 
 
 def main() -> None:
     page_header()
-    # No sidebar, no DB path control: always use default DB
     conn = get_connection_for_ui()
 
+    # TAB ORDER: descriptor search first, then compound search, then overview
     tab1, tab2, tab3 = st.tabs(
-        ["Odor search", "Descriptor search", "Odor overview"]
+        ["Descriptor search", "Compund search", "Odor overview"]
     )
 
-    selected_odor: Optional[OdorRow] = None
+    selected_odors_desc: List[OdorRow] = []
+    selected_odors_search: List[OdorRow] = []
+
     with tab1:
-        selected_odor = odor_search_tab(conn)
+        selected_odors_desc = descriptor_search_tab(conn)
     with tab2:
-        selected_odor_desc = descriptor_search_tab(conn)
-        if selected_odor_desc is not None:
-            selected_odor = selected_odor_desc
+        selected_odors_search = odor_search_tab(conn)
     with tab3:
         odors_overview_tab(conn)
 
-    if selected_odor is not None:
+    # Combine selections from both tabs, de-duplicate by unified_odor_id
+    combined: Dict[str, OdorRow] = {}
+    for o in selected_odors_desc + selected_odors_search:
+        combined[o.unified_odor_id] = o
+    selected_odors: List[OdorRow] = list(combined.values())
+
+    if selected_odors:
         st.markdown("---")
-        details_section(conn, selected_odor)
+        details_section_multi(conn, selected_odors)
 
 
 if __name__ == "__main__":
